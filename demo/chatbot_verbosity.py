@@ -41,5 +41,3 @@ def render(document_list: list, meta_data: dict, time_elapsed: float):
 
 if __name__ == "__main__":
   render(sys.argv[1], sys.argv[2])
-
-

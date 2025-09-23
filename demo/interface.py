@@ -79,18 +79,6 @@ info_message = """
   The system also records the chat history and chooses to use it in certain cases, allowing users to ask follow-up questions or tasks on the retrieved resumes.
 """
 
-about_message = """
-  # About
-
-  This small program is a prototype designed out of pure interest as additional work for the author's Bachelor's thesis project. 
-  The aim of the project is to propose and prove the effectiveness of RAG-based models in resume screening, thus inspiring more research into this field.
-
-  The program is very much a work in progress. I really appreciate any contribution or feedback on [GitHub](https://github.com/Hungreeee/Resume-Screening-RAG-Pipeline).
-
-  If you are interested, please don't hesitate to give me a star. ⭐
-"""
-
-
 st.set_page_config(page_title="Resume Screening GPT")
 st.title("Resume Screening GPT")
 
@@ -109,7 +97,6 @@ if "rag_pipeline" not in st.session_state:
 
 if "resume_list" not in st.session_state:
   st.session_state.resume_list = []
-
 
 
 def upload_file():
@@ -162,8 +149,8 @@ def clear_message():
   st.session_state.chat_history = [AIMessage(content=welcome_message)]
 
 
-
 user_query = st.chat_input("Type your message here...")
+
 
 with st.sidebar:
   st.markdown("# Control Panel")
@@ -173,13 +160,6 @@ with st.sidebar:
   st.text_input("GPT Model", "gpt-4o-mini", key="gpt_selection")
   st.file_uploader("Upload resumes", type=["csv"], key="uploaded_file", on_change=upload_file)
   st.button("Clear conversation", on_click=clear_message)
-
-  st.divider()
-  st.markdown(info_message)
-
-  st.divider()
-  st.markdown(about_message)
-  st.markdown("Made by [Hungreeee](https://github.com/Hungreeee)")
 
 
 for message in st.session_state.chat_history:
