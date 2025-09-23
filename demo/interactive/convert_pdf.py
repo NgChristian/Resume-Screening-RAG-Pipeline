@@ -22,5 +22,3 @@ with open(OUT_PATH, mode="w", newline="", encoding="utf-8") as csv_file:
             text += page.extract_text() + "\n"
         writer.writerow([id, text])
         id += 1
-
-# %%

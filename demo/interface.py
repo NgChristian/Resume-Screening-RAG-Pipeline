@@ -1,9 +1,22 @@
 import sys, os
 sys.dont_write_bytecode = True
 
-import time
 from dotenv import load_dotenv
+import time
+import streamlit as st
+import pandas as pd
+import os
+import io
+from pypdf import PdfReader
 
+# Ajouter le répertoire courant au chemin Python
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pdf_utils import process_pdf_files
+import pandas as pd
+
+# Ajouter le répertoire courant au chemin Python
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pdf_utils import process_pdf_files
 import pandas as pd
 import streamlit as st
 import openai
@@ -29,58 +42,37 @@ print(DATA_PATH)
 print(FAISS_PATH)
 
 welcome_message = """
-  #### Introduction 🚀
+  #### Introduction
 
-  The system is a RAG pipeline designed to assist hiring managers in searching for the most suitable candidates out of thousands of resumes more effectively. ⚡
+  The system is a RAG pipeline designed to assist hiring managers in searching for the most suitable candidates out of thousands of resumes more effectively.
 
   The idea is to use a similarity retriever to identify the most suitable applicants with job descriptions.
   This data is then augmented into an LLM generator for downstream tasks such as analysis, summarization, and decision-making. 
 
-  #### Getting started 🛠️
+  #### Getting started
 
-  1. To set up, please add your OpenAI's API key. 🔑 
-  2. Type in a job description query. 💬
+  1. To set up, please add your OpenAI's API key.
+  2. Type in a job description query.
 
-  Hint: The knowledge base of the LLM has been loaded with a pre-existing vectorstore of [resumes](https://github.com/Hungreeee/Resume-Screening-RAG-Pipeline/blob/main/data/main-data/synthetic-resumes.csv) to be used right away. 
-  In addition, you may also find example job descriptions to test [here](https://github.com/Hungreeee/Resume-Screening-RAG-Pipeline/blob/main/data/supplementary-data/job_title_des.csv).
-
-  Please make sure to check the sidebar for more useful information. 💡
+  Please make sure to check the sidebar for more useful information.
 """
 
-info_message = """
-  # Information
+st.set_page_config(page_title="Resume Screening GPT", layout="wide")
 
-  ### 1. What if I want to use my own resumes?
+# Afficher le logo en haut de la page
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:  # Centrer le logo
+    try:
+        logo_path = os.path.join(os.path.dirname(__file__), "assets/logo.png")
+        st.image(logo_path, use_column_width=True, output_format="PNG")
+    except Exception as e:
+        st.warning(f"Failed to load logo. Error: {str(e)}")
 
-  If you want to load in your own resumes file, simply use the uploading button above. 
-  Please make sure to have the following column names: `Resume` and `ID`. 
+# Spacing
+st.markdown("<div style='margin-top: 50px;'></div>", unsafe_allow_html=True)
 
-  Keep in mind that the indexing process can take **quite some time** to complete. ⌛
-
-  ### 2. What if I want to set my own parameters?
-
-  You can change the RAG mode and the GPT's model type using the sidebar options above. 
-
-  About the other parameters such as the generator's *temperature* or retriever's *top-K*, I don't want to allow modifying them for the time being to avoid certain problems. 
-  FYI, the temperature is currently set at `0.1` and the top-K is set at `5`.  
-
-  ### 3. Is my uploaded data safe? 
-
-  Your data is not being stored anyhow by the program. Everything is recorded in a Streamlit session state and will be removed once you refresh the app. 
-
-  However, it must be mentioned that the **uploaded data will be processed directly by OpenAI's GPT**, which I do not have control over. 
-  As such, it is highly recommended to use the default synthetic resumes provided by the program. 
-
-  ### 4. How does the chatbot work? 
-
-  The Chatbot works a bit differently to the original structure proposed in the paper so that it is more usable in practical use cases.
-
-  For example, the system classifies the intent of every single user prompt to know whether it is appropriate to toggle RAG retrieval on/off. 
-  The system also records the chat history and chooses to use it in certain cases, allowing users to ask follow-up questions or tasks on the retrieved resumes.
-"""
-
-st.set_page_config(page_title="Resume Screening GPT")
-st.title("Resume Screening GPT")
+# Left-aligned title
+st.markdown("<h3>Resume Screening GPT</h3>", unsafe_allow_html=True)
 
 if "chat_history" not in st.session_state:
   st.session_state.chat_history = [AIMessage(content=welcome_message)]
@@ -98,29 +90,119 @@ if "rag_pipeline" not in st.session_state:
 if "resume_list" not in st.session_state:
   st.session_state.resume_list = []
 
+def display_dataframe():
+    st.subheader("")
+    if not st.session_state.df.empty:
+        st.write(f"Nombre total de CVs chargs : {len(st.session_state.df)}")
+        st.dataframe(st.session_state.df.head(), use_container_width=True)
+        
+        # Afficher des statistiques de base
+        st.subheader("")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("", len(st.session_state.df))
+        with col2:
+            st.metric("", ", ".join(st.session_state.df.columns.tolist()))
+
+
+# Les fonctions de traitement PDF ont été déplacées dans pdf_utils.py
+
+def clear_uploaded_files():
+    """Reset the list of uploaded files"""
+    st.session_state.uploaded_file = None
+    st.session_state.df = pd.read_csv(DATA_PATH)
+    vectordb = FAISS.load_local(FAISS_PATH, st.session_state.embedding_model, 
+                              distance_strategy=DistanceStrategy.COSINE, 
+                              allow_dangerous_deserialization=True)
+    st.session_state.rag_pipeline = SelfQueryRetriever(vectordb, st.session_state.df)
 
 def upload_file():
-  modal = Modal(key="Demo Key", title="File Error", max_width=500)
-  if st.session_state.uploaded_file != None:
-    try:  
-      df_load = pd.read_csv(st.session_state.uploaded_file)
+    modal = Modal(key="File Error Modal", title="File Error", max_width=500)
+    
+    try:
+        # Vérifier si aucun fichier n'est téléchargé ou si la liste est vide
+        if not hasattr(st.session_state, 'uploaded_file') or st.session_state.uploaded_file is None or \
+           (isinstance(st.session_state.uploaded_file, list) and len(st.session_state.uploaded_file) == 0):
+            st.session_state.df = pd.read_csv(DATA_PATH)
+            vectordb = FAISS.load_local(FAISS_PATH, st.session_state.embedding_model, 
+                                      distance_strategy=DistanceStrategy.COSINE, 
+                                      allow_dangerous_deserialization=True)
+            st.session_state.rag_pipeline = SelfQueryRetriever(vectordb, st.session_state.df)
+            return
+        
+        # Vérifier si c'est un fichier unique ou multiple
+        uploaded_files = st.session_state.uploaded_file
+        if not isinstance(uploaded_files, list):
+            uploaded_files = [uploaded_files]
+        
+        # Filtrer les fichiers None (peut arriver lors de la suppression)
+        uploaded_files = [f for f in uploaded_files if f is not None]
+        
+        # Si plus aucun fichier valide après filtrage, réinitialiser
+        if not uploaded_files:
+            st.session_state.df = pd.read_csv(DATA_PATH)
+            vectordb = FAISS.load_local(FAISS_PATH, st.session_state.embedding_model, 
+                                      distance_strategy=DistanceStrategy.COSINE, 
+                                      allow_dangerous_deserialization=True)
+            st.session_state.rag_pipeline = SelfQueryRetriever(vectordb, st.session_state.df)
+            return
+        
+        data = []
+        
+        # Séparer les fichiers PDF et CSV
+        pdf_files = [f for f in uploaded_files if f is not None and hasattr(f, 'name') and f.name.lower().endswith('.pdf')]
+        csv_files = [f for f in uploaded_files if f is not None and hasattr(f, 'name') and f.name.lower().endswith('.csv')]
+        
+        # Traiter d'abord tous les fichiers PDF en une seule fois
+        if pdf_files:
+            try:
+                csv_data = process_pdf_files(pdf_files)
+                if csv_data:  # Vérifier que des données ont été retournées
+                    df = pd.read_csv(io.StringIO(csv_data))
+                    data.extend(df.to_dict('records'))
+            except Exception as e:
+                with modal.container():
+                    st.error(f"Erreur lors du traitement des fichiers PDF : {str(e)}")
+                return
+        
+        # Puis traiter les fichiers CSV
+        for file in csv_files:
+            try:
+                # Lire le fichier CSV
+                df = pd.read_csv(file)
+                if "Resume" not in df.columns or "ID" not in df.columns:
+                    raise ValueError("Le fichier CSV doit contenir les colonnes 'ID' et 'Resume'.")
+                data.extend(df.to_dict('records'))
+            except Exception as e:
+                with modal.container():
+                    st.error(f"Error reading file {getattr(file, 'name', 'unknown')}: {str(e)}")
+                continue
+        
+        # Si aucune donnée valide n'a été traitée
+        if not data:
+            st.session_state.df = pd.read_csv(DATA_PATH)
+            vectordb = FAISS.load_local(FAISS_PATH, st.session_state.embedding_model, 
+                                      distance_strategy=DistanceStrategy.COSINE, 
+                                      allow_dangerous_deserialization=True)
+            st.session_state.rag_pipeline = SelfQueryRetriever(vectordb, st.session_state.df)
+            return
+            
+        # Créer un DataFrame avec les données extraites
+        df_load = pd.DataFrame(data)
+        st.session_state.df = df_load
+        
+        # Créer les embeddings
+        try:
+            vectordb = ingest(st.session_state.df, "Resume", st.session_state.embedding_model)
+            # Configurer le pipeline de recherche
+            st.session_state.rag_pipeline = SelfQueryRetriever(vectordb, st.session_state.df)
+        except Exception as e:
+            with modal.container():
+                st.error(f"Error creating embeddings: {str(e)}")
+            
     except Exception as error:
-      with modal.container():
-        st.markdown("The uploaded file returns the following error message. Please check your csv file again.")
-        st.error(error)
-    else:
-      if "Resume" not in df_load.columns or "ID" not in df_load.columns:
         with modal.container():
-          st.error("Please include the following columns in your data: \"Resume\", \"ID\".")
-      else:
-        with st.toast('Indexing the uploaded data. This may take a while...'):
-          st.session_state.df = df_load
-          vectordb = ingest(st.session_state.df, "Resume", st.session_state.embedding_model)
-          st.session_state.retriever = SelfQueryRetriever(vectordb, st.session_state.df)
-  else:
-    st.session_state.df = pd.read_csv(DATA_PATH)
-    vectordb = FAISS.load_local(FAISS_PATH, st.session_state.embedding_model, distance_strategy=DistanceStrategy.COSINE, allow_dangerous_deserialization=True)
-    st.session_state.rag_pipeline = SelfQueryRetriever(vectordb, st.session_state.df)
+            st.error(f"Une erreur est survenue lors du traitement du fichier : {str(error)}")
 
 
 def check_openai_api_key(api_key: str):
@@ -158,8 +240,52 @@ with st.sidebar:
   st.text_input("OpenAI's API Key", type="password", key="api_key")
   st.selectbox("RAG Mode", ["Generic RAG", "RAG Fusion"], placeholder="Generic RAG", key="rag_selection")
   st.text_input("GPT Model", "gpt-4o-mini", key="gpt_selection")
-  st.file_uploader("Upload resumes", type=["csv"], key="uploaded_file", on_change=upload_file)
-  st.button("Clear conversation", on_click=clear_message)
+  
+  # File type dropdown
+  file_type = st.selectbox(
+      "Select file type:",
+      ["PDF", "CSV"],
+      index=0,  # Default to PDF
+      key="file_type"
+  )
+  
+  # Update file_uploader based on selected file type
+  if st.session_state.file_type == "PDF":
+      uploaded_files = st.file_uploader(
+          "Upload one or more PDF files",
+          type=["pdf"],
+          key="uploaded_file",
+          on_change=upload_file,
+          accept_multiple_files=True
+      )
+  else:
+      uploaded_files = st.file_uploader(
+          "Upload a CSV file",
+          type=["csv"],
+          key="uploaded_file",
+          on_change=upload_file
+      )
+  
+  # Selected files are managed automatically by Streamlit
+  # User can remove files directly via the file_uploader interface
+  
+  # File deletion is handled directly by the file_uploader widget
+  # using the 'x' next to the file name
+  # Clear conversation button
+  st.button("Clear conversation", on_click=clear_message, key="clear_chat_button")
+  with st.expander("View data"):
+    # Display only the table without the header
+    if not st.session_state.df.empty:
+        st.dataframe(st.session_state.df, use_container_width=True, hide_index=True)
+        
+        # Simplified download button
+        csv = st.session_state.df.to_csv(index=False, encoding='utf-8-sig')
+        st.download_button(
+            label="Download CVs as CSV",
+            data=csv,
+            file_name="cv_analysis.csv",
+            mime="text/csv"
+        )
 
 
 for message in st.session_state.chat_history:
