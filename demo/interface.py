@@ -41,22 +41,6 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL")
 print(DATA_PATH)
 print(FAISS_PATH)
 
-welcome_message = """
-  #### Introduction
-
-  The system is a RAG pipeline designed to assist hiring managers in searching for the most suitable candidates out of thousands of resumes more effectively.
-
-  The idea is to use a similarity retriever to identify the most suitable applicants with job descriptions.
-  This data is then augmented into an LLM generator for downstream tasks such as analysis, summarization, and decision-making. 
-
-  #### Getting started
-
-  1. To set up, please add your OpenAI's API key.
-  2. Type in a job description query.
-
-  Please make sure to check the sidebar for more useful information.
-"""
-
 st.set_page_config(page_title="Resume Screening GPT", layout="wide")
 
 # Afficher le logo en haut de la page
@@ -68,14 +52,9 @@ with col2:  # Centrer le logo
     except Exception as e:
         st.warning(f"Failed to load logo. Error: {str(e)}")
 
-# Spacing
-st.markdown("<div style='margin-top: 50px;'></div>", unsafe_allow_html=True)
-
-# Left-aligned title
-st.markdown("<h3>Resume Screening GPT</h3>", unsafe_allow_html=True)
 
 if "chat_history" not in st.session_state:
-  st.session_state.chat_history = [AIMessage(content=welcome_message)]
+  st.session_state.chat_history = []
 
 if "df" not in st.session_state:
   st.session_state.df = pd.read_csv(DATA_PATH)
@@ -228,7 +207,7 @@ def check_model_name(model_name: str, api_key: str):
 
 def clear_message():
   st.session_state.resume_list = []
-  st.session_state.chat_history = [AIMessage(content=welcome_message)]
+  st.session_state.chat_history = []
 
 
 user_query = st.chat_input("Type your message here...")
@@ -301,7 +280,6 @@ for message in st.session_state.chat_history:
 
 
 if not st.session_state.api_key:
-  st.info("Please add your OpenAI API key to continue. Learn more about [API keys](https://platform.openai.com/api-keys).")
   st.stop()
 
 if not check_openai_api_key(st.session_state.api_key):
